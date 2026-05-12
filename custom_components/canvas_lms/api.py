@@ -116,6 +116,26 @@ class CanvasApiClient:
             params=params,
         )
 
+    async def async_get_assignment_details(
+        self,
+        course_id: str,
+        assignment_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Fetch assignment details, including current-user submission state."""
+        if not assignment_ids:
+            return []
+
+        params: dict[str, Any] = {
+            "include[]": ["submission"],
+            "assignment_ids[]": assignment_ids,
+            "order_by": "due_at",
+            "per_page": 100,
+        }
+        return await self._async_paginated_get(
+            f"/api/v1/users/self/courses/{course_id}/assignments",
+            params=params,
+        )
+
     async def _async_get_json(
         self,
         path: str,

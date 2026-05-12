@@ -114,12 +114,23 @@ class CanvasDataUpdateCoordinator(DataUpdateCoordinator[CanvasSnapshot]):
 
         courses = [_normalize_course(course) for course in raw_courses]
         course_lookup = {course["id"]: course for course in courses}
+        assignment_details = await _async_fetch_assignment_details(
+            self._client,
+            raw_assignments,
+        )
 
         all_assignments = sorted(
             (
                 normalized
                 for item in raw_assignments
-                if (normalized := _normalize_calendar_assignment(item, course_lookup)) is not None
+                if (
+                    normalized := _normalize_calendar_assignment(
+                        item,
+                        course_lookup,
+                        assignment_details,
+                    )
+                )
+                is not None
             ),
             key=lambda item: item["due_at"],
         )
@@ -140,13 +151,14 @@ class CanvasDataUpdateCoordinator(DataUpdateCoordinator[CanvasSnapshot]):
             due_at: datetime = assignment["due_at"]
             course_id = assignment["course_id"]
             local_due_date = dt_util.as_local(due_at).date()
+            is_pending = assignment["needs_attention"]
 
-            if local_due_date == local_today:
+            if local_due_date == local_today and is_pending:
                 due_today_count += 1
                 due_today_assignments.append(assignment)
                 course_metrics[course_id]["due_today_count"] += 1
 
-            if due_at >= now:
+            if due_at >= now and is_pending:
                 future_assignments.append(assignment)
                 course_metrics[course_id]["due_window_count"] += 1
                 current_next_due = course_metrics[course_id]["next_due_at"]
@@ -259,6 +271,7 @@ def _extract_grade(enrollment: dict[str, Any]) -> str | None:
 def _normalize_calendar_assignment(
     event: dict[str, Any],
     course_lookup: dict[str, dict[str, Any]],
+    assignment_details: dict[tuple[str, str], dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Normalize an assignment event returned by the Canvas calendar API."""
     due_at = _parse_canvas_datetime(event.get("start_at"))
@@ -268,9 +281,12 @@ def _normalize_calendar_assignment(
     assignment = event.get("assignment") or {}
     course_id = _extract_course_id(event)
     course = course_lookup.get(course_id, {})
+    assignment_id = str(assignment.get("id") or event.get("id"))
+    detail = assignment_details.get((course_id, assignment_id), {})
+    submission = detail.get("submission") or {}
 
     return {
-        "id": str(assignment.get("id") or event.get("id")),
+        "id": assignment_id,
         "title": event.get("title") or assignment.get("name") or "Untitled assignment",
         "course_id": course_id,
         "course_name": course.get("name") or event.get("context_name"),
@@ -278,6 +294,9 @@ def _normalize_calendar_assignment(
         "html_url": event.get("html_url"),
         "points_possible": assignment.get("points_possible"),
         "submission_types": assignment.get("submission_types") or [],
+        "submission_state": submission.get("workflow_state"),
+        "submitted_at": _parse_canvas_datetime(submission.get("submitted_at")),
+        "needs_attention": _submission_needs_attention(submission),
     }
 
 
@@ -331,3 +350,57 @@ def _parse_canvas_datetime(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=dt_util.UTC)
     return parsed
+
+
+def _submission_needs_attention(submission: dict[str, Any]) -> bool:
+    """Return whether an assignment still appears unsubmitted for the current user."""
+    if not submission:
+        return True
+
+    if submission.get("excused"):
+        return False
+
+    if submission.get("missing"):
+        return True
+
+    workflow_state = str(submission.get("workflow_state") or "").lower()
+    if workflow_state in {"submitted", "graded", "pending_review"}:
+        return False
+
+    submitted_at = submission.get("submitted_at")
+    if submitted_at:
+        return False
+
+    return True
+
+
+async def _async_fetch_assignment_details(
+    client: CanvasApiClient,
+    raw_assignments: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Fetch submission-aware assignment details for the current due-window items."""
+    grouped_ids: dict[str, set[str]] = defaultdict(set)
+    for event in raw_assignments:
+        assignment = event.get("assignment") or {}
+        course_id = _extract_course_id(event)
+        assignment_id = str(assignment.get("id") or event.get("id") or "")
+        if not course_id or course_id == "unknown" or not assignment_id:
+            continue
+        grouped_ids[course_id].add(assignment_id)
+
+    if not grouped_ids:
+        return {}
+
+    detail_map: dict[tuple[str, str], dict[str, Any]] = {}
+    responses = await asyncio.gather(
+        *(
+            client.async_get_assignment_details(course_id, sorted(assignment_ids))
+            for course_id, assignment_ids in grouped_ids.items()
+        )
+    )
+
+    for course_id, details in zip(grouped_ids, responses, strict=False):
+        for detail in details:
+            detail_map[(course_id, str(detail["id"]))] = detail
+
+    return detail_map
