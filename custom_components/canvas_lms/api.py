@@ -72,7 +72,9 @@ class CanvasApiClient:
         return await self._async_paginated_get("/api/v1/courses", params=params)
 
     async def async_get_upcoming_assignments(
-        self, window_days: int
+        self,
+        window_days: int,
+        context_codes: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch upcoming assignment calendar items across courses."""
         start_of_day = dt_util.start_of_local_day()
@@ -82,7 +84,26 @@ class CanvasApiClient:
             "end_date": (start_of_day + timedelta(days=window_days + 1)).isoformat(),
             "per_page": 100,
         }
-        return await self._async_paginated_get("/api/v1/calendar_events", params=params)
+        if not context_codes:
+            return await self._async_paginated_get("/api/v1/calendar_events", params=params)
+
+        items: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        for chunk_start in range(0, len(context_codes), 10):
+            chunk = context_codes[chunk_start : chunk_start + 10]
+            payload = await self._async_paginated_get(
+                "/api/v1/calendar_events",
+                params={**params, "context_codes[]": chunk},
+            )
+            for item in payload:
+                item_id = str(item.get("id"))
+                if item_id in seen_ids:
+                    continue
+                seen_ids.add(item_id)
+                items.append(item)
+
+        return items
 
     async def async_get_missing_assignments(self) -> list[dict[str, Any]]:
         """Fetch currently missing submissions."""

@@ -91,12 +91,14 @@ class CanvasDataUpdateCoordinator(DataUpdateCoordinator[CanvasSnapshot]):
 
         try:
             profile = self.data.profile if self.data is not None else await self._client.async_validate()
-            raw_courses, raw_assignments, raw_missing = await asyncio.gather(
+            raw_courses, raw_missing = await asyncio.gather(
                 self._client.async_get_courses(include_completed=include_completed),
-                self._client.async_get_upcoming_assignments(
-                    window_days=assignment_window_days
-                ),
                 self._client.async_get_missing_assignments(),
+            )
+            course_context_codes = [f"course_{course['id']}" for course in raw_courses]
+            raw_assignments = await self._client.async_get_upcoming_assignments(
+                window_days=assignment_window_days,
+                context_codes=course_context_codes,
             )
         except (CanvasAuthError, OAuth2TokenRequestReauthError) as err:
             raise ConfigEntryAuthFailed(
