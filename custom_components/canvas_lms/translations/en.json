@@ -1,0 +1,37 @@
+{
+  "title": "Canvas LMS",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Canvas LMS",
+        "description": "Enter your Canvas base URL and a Canvas API token.",
+        "data": {
+          "base_url": "Canvas base URL",
+          "api_token": "API token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to reach Canvas.",
+      "invalid_auth": "The API token was rejected by Canvas.",
+      "invalid_url": "Enter a valid Canvas base URL.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This Canvas account is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Canvas LMS options",
+        "description": "Tune how often the integration refreshes and how far ahead assignments are tracked.",
+        "data": {
+          "scan_interval_minutes": "Refresh interval (minutes)",
+          "assignment_window_days": "Upcoming assignment window (days)",
+          "include_completed_courses": "Include completed courses"
+        }
+      }
+    }
+  }
+}
