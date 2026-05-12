@@ -12,9 +12,13 @@ Existing token-based installs can continue working.
 ## What it exposes
 
 - `Next assignment due`
+- `Next assignment name`
+- `Next assignment course`
 - `Upcoming assignments`
+- `Assignments due this week`
 - `Assignments due today`
 - `Missing assignments`
+- `Courses with upcoming assignments`
 - `Courses tracked`
 - `Assignments needing grading`
 

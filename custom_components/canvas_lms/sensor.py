@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
@@ -12,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_BASE_URL, DOMAIN, MAX_ATTRIBUTE_ITEMS
 from .coordinator import CanvasDataUpdateCoordinator, CanvasSnapshot
@@ -23,6 +25,33 @@ class CanvasSensorDescription(SensorEntityDescription):
 
     value_fn: Callable[[CanvasSnapshot], Any]
     attrs_fn: Callable[[CanvasSnapshot], dict[str, Any]]
+
+
+def _next_assignment_field(data: CanvasSnapshot, field: str) -> Any:
+    """Return a field from the next assignment, if one exists."""
+    if not data.next_assignment:
+        return None
+    return data.next_assignment.get(field)
+
+
+def _window_end(data: CanvasSnapshot):
+    """Return the local date at the end of the configured assignment window."""
+    return data.upcoming_assignments[-1]["due_at"].date() if data.upcoming_assignments else None
+
+
+def _due_this_week_count(data: CanvasSnapshot) -> int:
+    """Count assignments due within the next 7 days."""
+    week_end = dt_util.as_local(dt_util.now() + timedelta(days=7)).date()
+    return sum(
+        1
+        for assignment in data.upcoming_assignments
+        if dt_util.as_local(assignment["due_at"]).date() <= week_end
+    )
+
+
+def _courses_with_upcoming_count(data: CanvasSnapshot) -> int:
+    """Count courses that currently have at least one upcoming assignment."""
+    return sum(1 for course in data.courses if (course.get("due_window_count") or 0) > 0)
 
 
 def _serialize_assignments(assignments: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -38,6 +67,11 @@ def _serialize_assignments(assignments: list[dict[str, Any]]) -> list[dict[str, 
                 else None,
                 "url": assignment.get("html_url"),
                 "points_possible": assignment.get("points_possible"),
+                "submission_state": assignment.get("submission_state"),
+                "submitted_at": assignment["submitted_at"].isoformat()
+                if assignment.get("submitted_at") is not None
+                else None,
+                "needs_attention": assignment.get("needs_attention"),
             }
         )
     return serialized
@@ -86,12 +120,54 @@ SENSOR_DESCRIPTIONS: tuple[CanvasSensorDescription, ...] = (
         },
     ),
     CanvasSensorDescription(
+        key="next_assignment_name",
+        name="Next assignment name",
+        value_fn=lambda data: _next_assignment_field(data, "title"),
+        attrs_fn=lambda data: {
+            "due_at": _next_assignment_field(data, "due_at").isoformat()
+            if _next_assignment_field(data, "due_at") is not None
+            else None,
+            "course": _next_assignment_field(data, "course_name"),
+            "url": _next_assignment_field(data, "html_url"),
+            "points_possible": _next_assignment_field(data, "points_possible"),
+            "submission_state": _next_assignment_field(data, "submission_state"),
+        },
+    ),
+    CanvasSensorDescription(
+        key="next_assignment_course",
+        name="Next assignment course",
+        value_fn=lambda data: _next_assignment_field(data, "course_name"),
+        attrs_fn=lambda data: {
+            "assignment": _next_assignment_field(data, "title"),
+            "due_at": _next_assignment_field(data, "due_at").isoformat()
+            if _next_assignment_field(data, "due_at") is not None
+            else None,
+            "url": _next_assignment_field(data, "html_url"),
+        },
+    ),
+    CanvasSensorDescription(
         key="upcoming_assignments",
         name="Upcoming assignments",
         value_fn=lambda data: data.due_window_count,
         attrs_fn=lambda data: {
             "window_days": data.assignment_window_days,
+            "window_end": _window_end(data).isoformat() if _window_end(data) is not None else None,
             "assignments": _serialize_assignments(data.upcoming_assignments),
+        },
+    ),
+    CanvasSensorDescription(
+        key="assignments_due_this_week",
+        name="Assignments due this week",
+        value_fn=_due_this_week_count,
+        attrs_fn=lambda data: {
+            "week_assignments": _serialize_assignments(
+                [
+                    assignment
+                    for assignment in data.upcoming_assignments
+                    if dt_util.as_local(assignment["due_at"]).date()
+                    <= dt_util.as_local(dt_util.now() + timedelta(days=7)).date()
+                ]
+            ),
         },
     ),
     CanvasSensorDescription(
@@ -109,6 +185,16 @@ SENSOR_DESCRIPTIONS: tuple[CanvasSensorDescription, ...] = (
         value_fn=lambda data: data.missing_count,
         attrs_fn=lambda data: {
             "assignments": _serialize_assignments(data.missing_assignments),
+        },
+    ),
+    CanvasSensorDescription(
+        key="courses_with_upcoming_assignments",
+        name="Courses with upcoming assignments",
+        value_fn=_courses_with_upcoming_count,
+        attrs_fn=lambda data: {
+            "courses": _serialize_courses(
+                [course for course in data.courses if (course.get("due_window_count") or 0) > 0]
+            ),
         },
     ),
     CanvasSensorDescription(
