@@ -36,6 +36,7 @@ class CanvasApiClient:
         session: aiohttp.ClientSession,
         base_url: str,
         bearer_token: str | None = None,
+        cookie_header: str | None = None,
         oauth_session: config_entry_oauth2_flow.OAuth2Session | None = None,
     ) -> None:
         """Store client dependencies."""
@@ -45,6 +46,9 @@ class CanvasApiClient:
         self._headers = {"Accept": "application/json"}
         if bearer_token:
             self._headers["Authorization"] = f"Bearer {bearer_token}"
+        if cookie_header:
+            self._headers["Cookie"] = cookie_header
+            self._headers["Referer"] = f"{self._base_url}/"
         self._timeout = aiohttp.ClientTimeout(total=DEFAULT_REQUEST_TIMEOUT)
 
     async def async_validate(self) -> dict[str, Any]:

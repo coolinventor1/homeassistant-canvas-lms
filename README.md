@@ -2,7 +2,12 @@
 
 `canvas_lms` is a HACS-ready custom integration for Home Assistant that connects to Canvas and exposes assignment and course data as sensors.
 
-New installations use Canvas OAuth so you do not need a manually created personal access token. Existing token-based installs can continue working.
+It supports two connection modes:
+
+- Browser session cookie mode for a no-admin fallback
+- OAuth mode for a cleaner long-term setup when a Canvas Developer Key is available
+
+Existing token-based installs can continue working.
 
 ## What it exposes
 
@@ -35,7 +40,21 @@ Add the integration from **Settings -> Devices & services -> Add integration** a
 You will need:
 
 - Your Canvas base URL, for example `https://school.instructure.com`
-- A Canvas OAuth client ID and client secret from a Canvas Developer Key
+
+Then choose one of these setup paths.
+
+## Browser session cookie setup
+
+This is the easiest no-admin fallback.
+
+1. Log into Canvas in your browser.
+2. Open browser developer tools.
+3. Open the Network tab and reload a Canvas page.
+4. Click a request going to your Canvas domain.
+5. Copy the request `Cookie` header value.
+6. In Home Assistant, choose the `Browser session cookie` setup method and paste that value.
+
+The most important cookie is usually `canvas_session`, but pasting the full cookie header value is recommended.
 
 ## Canvas OAuth setup
 
@@ -60,4 +79,5 @@ If the Developer Key is scoped, ask them to enable `Allow Include Parameters` as
 
 - The integration polls Canvas on a configurable interval. The default is every 15 minutes.
 - Upcoming assignment tracking defaults to a 14-day window.
+- Browser session cookies are not permanent. If Canvas expires the session, Home Assistant will ask you to reconnect with a fresh cookie.
 - Canvas access tokens issued through OAuth expire quickly, so the integration stores the refresh token and renews access automatically.

@@ -4,6 +4,21 @@
     "step": {
       "user": {
         "title": "Connect to Canvas LMS",
+        "description": "Choose how to connect Home Assistant to Canvas.",
+        "data": {
+          "auth_mode": "Connection method"
+        }
+      },
+      "browser_session": {
+        "title": "Connect with Browser Session Cookie",
+        "description": "Paste the Cookie request header from a logged-in Canvas browser session. The full value is recommended, for example `canvas_session=...; _csrf_token=...`.",
+        "data": {
+          "base_url": "Canvas base URL",
+          "browser_cookie": "Browser Cookie header value"
+        }
+      },
+      "oauth_setup": {
+        "title": "Connect with Canvas OAuth",
         "description": "Enter your Canvas base URL plus the OAuth client ID and client secret from a Canvas Developer Key. Your Canvas admin must allow the redirect URI `{redirect_uri}`.",
         "data": {
           "base_url": "Canvas base URL",
@@ -14,10 +29,18 @@
       "reauth_confirm": {
         "title": "Reconnect Canvas LMS",
         "description": "Reconnect your Canvas account for `{host}`."
+      },
+      "reauth_session": {
+        "title": "Refresh Canvas Browser Session",
+        "description": "Paste a fresh Canvas Cookie header value for `{host}`.",
+        "data": {
+          "browser_cookie": "Browser Cookie header value"
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to reach Canvas.",
+      "invalid_auth": "Canvas rejected the supplied credentials.",
       "invalid_url": "Enter a valid Canvas base URL.",
       "unknown": "An unexpected error occurred."
     },

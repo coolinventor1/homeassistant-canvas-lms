@@ -10,6 +10,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .api import CanvasApiClient
 from .const import (
     CONF_API_TOKEN,
+    CONF_BROWSER_COOKIE,
     CONF_BASE_URL,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
@@ -29,6 +30,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             session=websession,
             base_url=entry.data[CONF_BASE_URL],
             bearer_token=entry.data[CONF_API_TOKEN],
+        )
+    elif CONF_BROWSER_COOKIE in entry.data:
+        client = CanvasApiClient(
+            session=websession,
+            base_url=entry.data[CONF_BASE_URL],
+            cookie_header=entry.data[CONF_BROWSER_COOKIE],
         )
     else:
         implementation = CanvasOAuth2Implementation(

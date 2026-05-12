@@ -16,8 +16,12 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import CanvasApiClient, CanvasApiError, CanvasConnectionError
 from .const import (
+    AUTH_MODE_BROWSER_SESSION,
+    AUTH_MODE_OAUTH,
+    CONF_AUTH_MODE,
     CONF_ASSIGNMENT_WINDOW_DAYS,
     CONF_BASE_URL,
+    CONF_BROWSER_COOKIE,
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_INCLUDE_COMPLETED_COURSES,
@@ -47,7 +51,9 @@ class CanvasLmsConfigFlow(
     def __init__(self) -> None:
         """Initialize the Canvas config flow."""
         super().__init__()
+        self._auth_mode = AUTH_MODE_OAUTH
         self._base_url = ""
+        self._browser_cookie = ""
         self._client_id = ""
         self._client_secret = ""
         self._reauth_entry: config_entries.ConfigEntry | None = None
@@ -66,18 +72,87 @@ class CanvasLmsConfigFlow(
         return CanvasLmsOptionsFlow(config_entry)
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle the initial setup step."""
+        """Choose how the integration should authenticate."""
+        if user_input is not None:
+            auth_mode = user_input[CONF_AUTH_MODE]
+            if auth_mode == AUTH_MODE_BROWSER_SESSION:
+                return await self.async_step_browser_session()
+            return await self.async_step_oauth_setup()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_AUTH_MODE,
+                        default=AUTH_MODE_BROWSER_SESSION,
+                    ): vol.In(
+                        {
+                            AUTH_MODE_BROWSER_SESSION: "Browser session cookie",
+                            AUTH_MODE_OAUTH: "OAuth client ID and secret",
+                        }
+                    )
+                }
+            ),
+        )
+
+    async def async_step_oauth_setup(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Collect OAuth client details."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
             try:
+                self._auth_mode = AUTH_MODE_OAUTH
                 self._configure_oauth(user_input)
             except InvalidCanvasUrl:
                 errors[CONF_BASE_URL] = "invalid_url"
             else:
                 return await self.async_step_auth()
 
-        return self._async_show_oauth_form("user", user_input, errors)
+        return self._async_show_oauth_form("oauth_setup", user_input, errors)
+
+    async def async_step_browser_session(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure the integration with a copied Canvas browser session."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                self._auth_mode = AUTH_MODE_BROWSER_SESSION
+                self._base_url = _normalize_base_url(user_input[CONF_BASE_URL])
+                self._browser_cookie = _normalize_cookie_header(
+                    user_input[CONF_BROWSER_COOKIE]
+                )
+                info = await _async_validate_session_login(
+                    self.hass,
+                    self._base_url,
+                    self._browser_cookie,
+                )
+            except InvalidCanvasUrl:
+                errors[CONF_BASE_URL] = "invalid_url"
+            except CanvasConnectionError:
+                errors["base"] = "cannot_connect"
+            except CanvasApiError:
+                errors["base"] = "invalid_auth"
+            else:
+                return await self._async_finish_manual_entry(info)
+
+        return self.async_show_form(
+            step_id="browser_session",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_BASE_URL,
+                        default=(user_input or {}).get(CONF_BASE_URL, "https://"),
+                    ): str,
+                    vol.Required(CONF_BROWSER_COOKIE): str,
+                }
+            ),
+            errors=errors,
+        )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
         """Handle re-authentication requests."""
@@ -86,8 +161,11 @@ class CanvasLmsConfigFlow(
             return self.async_abort(reason="unknown")
 
         self._base_url = self._reauth_entry.data.get(CONF_BASE_URL, "")
+        self._browser_cookie = self._reauth_entry.data.get(CONF_BROWSER_COOKIE, "")
         self._client_id = self._reauth_entry.data.get(CONF_CLIENT_ID, "")
         self._client_secret = self._reauth_entry.data.get(CONF_CLIENT_SECRET, "")
+        if CONF_BROWSER_COOKIE in self._reauth_entry.data:
+            return await self.async_step_reauth_session()
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -107,6 +185,42 @@ class CanvasLmsConfigFlow(
 
         return self.async_show_form(
             step_id="reauth_confirm",
+            description_placeholders={
+                "host": urlsplit(self._base_url).netloc or self._base_url
+            },
+        )
+
+    async def async_step_reauth_session(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Refresh a copied Canvas browser session cookie."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                self._browser_cookie = _normalize_cookie_header(
+                    user_input[CONF_BROWSER_COOKIE]
+                )
+                info = await _async_validate_session_login(
+                    self.hass,
+                    self._base_url,
+                    self._browser_cookie,
+                )
+            except CanvasConnectionError:
+                errors["base"] = "cannot_connect"
+            except CanvasApiError:
+                errors["base"] = "invalid_auth"
+            else:
+                return await self._async_finish_manual_entry(info)
+
+        return self.async_show_form(
+            step_id="reauth_session",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_BROWSER_COOKIE): str,
+                }
+            ),
+            errors=errors,
             description_placeholders={
                 "host": urlsplit(self._base_url).netloc or self._base_url
             },
@@ -133,6 +247,24 @@ class CanvasLmsConfigFlow(
             **data,
         }
 
+        return await self._async_finish_entry(info, entry_data, unique_id)
+
+    async def _async_finish_manual_entry(self, info: dict[str, Any]) -> FlowResult:
+        """Create or update an entry for browser-session authentication."""
+        unique_id = f"{info['host']}:{info['user_id']}"
+        entry_data = {
+            CONF_BASE_URL: self._base_url,
+            CONF_BROWSER_COOKIE: self._browser_cookie,
+        }
+        return await self._async_finish_entry(info, entry_data, unique_id)
+
+    async def _async_finish_entry(
+        self,
+        info: dict[str, Any],
+        entry_data: dict[str, Any],
+        unique_id: str,
+    ) -> FlowResult:
+        """Finalize either a new entry or a reauth update."""
         if self._reauth_entry is not None:
             if self._reauth_entry.unique_id and self._reauth_entry.unique_id != unique_id:
                 return self.async_abort(reason="wrong_account")
@@ -265,6 +397,27 @@ async def _async_validate_oauth_login(
     }
 
 
+async def _async_validate_session_login(
+    hass,
+    base_url: str,
+    cookie_header: str,
+) -> dict[str, Any]:
+    """Validate a copied Canvas session cookie."""
+    client = CanvasApiClient(
+        session=async_get_clientsession(hass),
+        base_url=base_url,
+        cookie_header=cookie_header,
+    )
+    profile = await client.async_validate()
+    parsed = urlsplit(base_url)
+
+    return {
+        "title": f"{profile.get('short_name') or profile.get('name') or 'Canvas'} @ {parsed.netloc}",
+        "host": parsed.netloc.lower(),
+        "user_id": profile["id"],
+    }
+
+
 def _normalize_base_url(value: str) -> str:
     """Normalize user-provided Canvas URLs into a stable base URL."""
     candidate = value.strip()
@@ -292,3 +445,11 @@ def _get_redirect_uri_placeholder(hass) -> str:
         return config_entry_oauth2_flow.async_get_redirect_uri(hass)
     except Exception:  # pragma: no cover - depends on runtime request context
         return "https://<your-home-assistant>/auth/external/callback"
+
+
+def _normalize_cookie_header(value: str) -> str:
+    """Normalize a pasted Cookie header value."""
+    normalized = value.strip()
+    if normalized.lower().startswith("cookie:"):
+        normalized = normalized.split(":", 1)[1].strip()
+    return normalized
