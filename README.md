@@ -2,6 +2,8 @@
 
 `canvas_lms` is a HACS-ready custom integration for Home Assistant that connects to Canvas and exposes assignment and course data as sensors.
 
+New installations use Canvas OAuth so you do not need a manually created personal access token. Existing token-based installs can continue working.
+
 ## What it exposes
 
 - `Next assignment due`
@@ -17,10 +19,9 @@ The sensors include useful attributes such as assignment titles, due dates, cour
 
 ### HACS custom repository
 
-1. Push this repository to GitHub.
-2. In HACS, add it as a custom repository with category `Integration`.
-3. Install `Canvas LMS`.
-4. Restart Home Assistant.
+1. In HACS, add `https://github.com/coolinventor1/homeassistant-canvas-lms` as a custom repository with category `Integration`.
+2. Install `Canvas LMS`.
+3. Restart Home Assistant.
 
 ### Manual install
 
@@ -34,11 +35,29 @@ Add the integration from **Settings -> Devices & services -> Add integration** a
 You will need:
 
 - Your Canvas base URL, for example `https://school.instructure.com`
-- A Canvas API token from your Canvas account settings
+- A Canvas OAuth client ID and client secret from a Canvas Developer Key
+
+## Canvas OAuth setup
+
+Ask your Canvas admin to create or enable a Canvas API Developer Key for this integration.
+
+They should configure:
+
+- A redirect URI matching the value Home Assistant shows during setup
+- Usually this is `https://<your-home-assistant>/auth/external/callback`
+- If your Home Assistant instance uses My Home Assistant for OAuth redirects, use the exact redirect URI shown in the setup form instead
+
+If the Developer Key is scoped, ask them to allow these scopes:
+
+- `url:GET|/api/v1/users/self/profile`
+- `url:GET|/api/v1/courses`
+- `url:GET|/api/v1/calendar_events`
+- `url:GET|/api/v1/users/self/missing_submissions`
+
+If the Developer Key is scoped, ask them to enable `Allow Include Parameters` as well. This integration relies on Canvas `include[]` query parameters for course details such as teachers and grading summaries.
 
 ## Notes
 
 - The integration polls Canvas on a configurable interval. The default is every 15 minutes.
 - Upcoming assignment tracking defaults to a 14-day window.
-- If you publish this repo, update the placeholder GitHub URLs in `custom_components/canvas_lms/manifest.json`.
-
+- Canvas access tokens issued through OAuth expire quickly, so the integration stores the refresh token and renews access automatically.

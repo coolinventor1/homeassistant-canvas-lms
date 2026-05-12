@@ -11,6 +11,11 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    OAuth2TokenRequestError,
+    OAuth2TokenRequestReauthError,
+)
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -93,8 +98,12 @@ class CanvasDataUpdateCoordinator(DataUpdateCoordinator[CanvasSnapshot]):
                 ),
                 self._client.async_get_missing_assignments(),
             )
-        except CanvasAuthError as err:
-            raise UpdateFailed("Canvas authentication failed. Reconfigure the token.") from err
+        except (CanvasAuthError, OAuth2TokenRequestReauthError) as err:
+            raise ConfigEntryAuthFailed(
+                "Canvas authentication failed. Re-authentication is required."
+            ) from err
+        except OAuth2TokenRequestError as err:
+            raise UpdateFailed("Canvas OAuth token refresh failed.") from err
         except CanvasApiError as err:
             raise UpdateFailed(str(err)) from err
 

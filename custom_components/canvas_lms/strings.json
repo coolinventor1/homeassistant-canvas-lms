@@ -4,21 +4,36 @@
     "step": {
       "user": {
         "title": "Connect to Canvas LMS",
-        "description": "Enter your Canvas base URL and a Canvas API token.",
+        "description": "Enter your Canvas base URL plus the OAuth client ID and client secret from a Canvas Developer Key. Your Canvas admin must allow the redirect URI `{redirect_uri}`.",
         "data": {
           "base_url": "Canvas base URL",
-          "api_token": "API token"
+          "client_id": "OAuth client ID",
+          "client_secret": "OAuth client secret"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect Canvas LMS",
+        "description": "Reconnect your Canvas account for `{host}`."
       }
     },
     "error": {
       "cannot_connect": "Failed to reach Canvas.",
-      "invalid_auth": "The API token was rejected by Canvas.",
       "invalid_url": "Enter a valid Canvas base URL.",
       "unknown": "An unexpected error occurred."
     },
     "abort": {
-      "already_configured": "This Canvas account is already configured."
+      "already_configured": "This Canvas account is already configured.",
+      "authorize_url_timeout": "Timed out while preparing the Canvas sign-in URL.",
+      "missing_oauth_configuration": "This entry does not have enough OAuth configuration to reauthenticate. Remove and add it again.",
+      "no_url_available": "Home Assistant does not have an external URL available for OAuth redirect setup.",
+      "oauth_failed": "Canvas rejected the OAuth token exchange.",
+      "oauth_error": "Canvas OAuth succeeded, but the returned access token could not be validated.",
+      "oauth_timeout": "Timed out while finishing the Canvas OAuth exchange.",
+      "oauth_unauthorized": "Canvas reported that this OAuth client is no longer authorized.",
+      "reauth_successful": "Canvas LMS was reconnected successfully.",
+      "unknown": "An unexpected error occurred.",
+      "user_rejected_authorize": "Canvas authorization was canceled: {error}",
+      "wrong_account": "The authorized Canvas account does not match the existing integration entry."
     }
   },
   "options": {
@@ -35,4 +50,3 @@
     }
   }
 }
-

@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 import aiohttp
+from homeassistant.helpers import config_entry_oauth2_flow
 from homeassistant.util import dt as dt_util
 
 from .const import DEFAULT_REQUEST_TIMEOUT
@@ -34,15 +35,16 @@ class CanvasApiClient:
         self,
         session: aiohttp.ClientSession,
         base_url: str,
-        api_token: str,
+        bearer_token: str | None = None,
+        oauth_session: config_entry_oauth2_flow.OAuth2Session | None = None,
     ) -> None:
         """Store client dependencies."""
         self._session = session
         self._base_url = base_url.rstrip("/")
-        self._headers = {
-            "Accept": "application/json",
-            "Authorization": f"Bearer {api_token}",
-        }
+        self._oauth_session = oauth_session
+        self._headers = {"Accept": "application/json"}
+        if bearer_token:
+            self._headers["Authorization"] = f"Bearer {bearer_token}"
         self._timeout = aiohttp.ClientTimeout(total=DEFAULT_REQUEST_TIMEOUT)
 
     async def async_validate(self) -> dict[str, Any]:
@@ -126,25 +128,39 @@ class CanvasApiClient:
         params: Mapping[str, Any] | None = None,
     ) -> tuple[Any, Mapping[str, str]]:
         """Perform a GET request and decode the JSON response."""
+        response: aiohttp.ClientResponse | None = None
         try:
-            async with self._session.get(
-                url,
-                headers=self._headers,
-                params=params,
-                timeout=self._timeout,
-            ) as response:
-                if response.status in (401, 403):
-                    raise CanvasAuthError("Canvas rejected the supplied API token.")
-                if response.status >= 400:
-                    detail = await response.text()
-                    raise CanvasApiError(
-                        f"Canvas returned HTTP {response.status}: {detail[:200]}"
-                    )
-                return await response.json(content_type=None), response.headers
+            if self._oauth_session is not None:
+                response = await self._oauth_session.async_request(
+                    "GET",
+                    url,
+                    params=params,
+                    timeout=self._timeout,
+                    headers=self._headers,
+                )
+            else:
+                response = await self._session.get(
+                    url,
+                    headers=self._headers,
+                    params=params,
+                    timeout=self._timeout,
+                )
+
+            if response.status in (401, 403):
+                raise CanvasAuthError("Canvas rejected the supplied credentials.")
+            if response.status >= 400:
+                detail = await response.text()
+                raise CanvasApiError(
+                    f"Canvas returned HTTP {response.status}: {detail[:200]}"
+                )
+            return await response.json(content_type=None), response.headers
         except aiohttp.ClientError as err:
             raise CanvasConnectionError("Could not reach the Canvas API.") from err
         except TimeoutError as err:
             raise CanvasConnectionError("Canvas API request timed out.") from err
+        finally:
+            if response is not None:
+                response.release()
 
     def _build_url(self, path: str) -> str:
         """Build an absolute request URL from an API path."""
