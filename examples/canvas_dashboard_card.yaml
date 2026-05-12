@@ -1,0 +1,63 @@
+type: vertical-stack
+cards:
+  - type: markdown
+    title: Canvas
+    entity_id:
+      - sensor.REPLACE_next_assignment_name
+      - sensor.REPLACE_next_assignment_course
+      - sensor.REPLACE_next_assignment_due
+      - sensor.REPLACE_assignments_due_today
+      - sensor.REPLACE_assignments_due_this_week
+      - sensor.REPLACE_missing_assignments
+    content: >-
+      {% set next_name = states('sensor.REPLACE_next_assignment_name') %}
+      {% set next_course = states('sensor.REPLACE_next_assignment_course') %}
+      {% set next_due = states('sensor.REPLACE_next_assignment_due') %}
+      {% if next_name not in ['unknown', 'unavailable', 'None', ''] %}
+      ## Next up
+
+      **{{ next_name }}**
+
+      {{ next_course }}  
+      Due: {{ next_due }}
+      {% else %}
+      ## Next up
+
+      No pending assignments in the current Canvas window.
+      {% endif %}
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: tile
+        entity: sensor.REPLACE_next_assignment_due
+        name: Next due
+        color: teal
+      - type: tile
+        entity: sensor.REPLACE_assignments_due_today
+        name: Due today
+        color: amber
+      - type: tile
+        entity: sensor.REPLACE_assignments_due_this_week
+        name: This week
+        color: blue
+      - type: tile
+        entity: sensor.REPLACE_missing_assignments
+        name: Missing
+        color: red
+  - type: entities
+    title: Canvas workload
+    show_header_toggle: false
+    entities:
+      - entity: sensor.REPLACE_next_assignment_name
+        name: Next assignment
+      - entity: sensor.REPLACE_next_assignment_course
+        name: Course
+      - entity: sensor.REPLACE_upcoming_assignments
+        name: Upcoming assignments
+      - entity: sensor.REPLACE_courses_with_upcoming_assignments
+        name: Courses with upcoming work
+      - entity: sensor.REPLACE_courses_tracked
+        name: Courses tracked
+      - entity: sensor.REPLACE_missing_assignments
+        name: Missing assignments
