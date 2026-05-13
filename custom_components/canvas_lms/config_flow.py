@@ -350,7 +350,7 @@ class CanvasLmsOptionsFlow(config_entries.OptionsFlow):
                                 DEFAULT_SCAN_INTERVAL_MINUTES,
                             ),
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=5, max=180)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=2, max=180)),
                     vol.Required(
                         CONF_ASSIGNMENT_WINDOW_DAYS,
                         default=options.get(

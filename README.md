@@ -81,7 +81,7 @@ If the Developer Key is scoped, ask them to enable `Allow Include Parameters` as
 
 ## Notes
 
-- The integration polls Canvas on a configurable interval. The default is every 15 minutes.
+- The integration polls Canvas on a configurable interval. The default is every 2 minutes.
 - Upcoming assignment tracking defaults to a 14-day window.
 - Browser session cookies are not permanent. If Canvas expires the session, Home Assistant will ask you to reconnect with a fresh cookie.
 - Canvas access tokens issued through OAuth expire quickly, so the integration stores the refresh token and renews access automatically.
