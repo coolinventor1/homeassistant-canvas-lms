@@ -114,9 +114,16 @@ class CanvasDataUpdateCoordinator(DataUpdateCoordinator[CanvasSnapshot]):
 
         courses = [_normalize_course(course) for course in raw_courses]
         course_lookup = {course["id"]: course for course in courses}
-        assignment_details = await _async_fetch_assignment_details(
-            self._client,
-            raw_assignments,
+        assignment_details, analytics_by_course = await asyncio.gather(
+            _async_fetch_assignment_details(
+                self._client,
+                raw_assignments,
+            ),
+            _async_fetch_course_assignment_analytics(
+                self._client,
+                str(profile["id"]),
+                raw_courses,
+            ),
         )
 
         all_assignments = sorted(
@@ -167,11 +174,32 @@ class CanvasDataUpdateCoordinator(DataUpdateCoordinator[CanvasSnapshot]):
                     course_metrics[course_id]["next_due_title"] = assignment["title"]
 
         for course in courses:
+            last_graded = _extract_last_graded_assignment(
+                analytics_by_course.get(course["id"], [])
+            )
             metrics = course_metrics[course["id"]]
             course["due_today_count"] = metrics["due_today_count"]
             course["due_window_count"] = metrics["due_window_count"]
             course["next_due_at"] = metrics["next_due_at"]
             course["next_due_title"] = metrics["next_due_title"]
+            course["last_graded_assignment_title"] = (
+                last_graded["title"] if last_graded is not None else None
+            )
+            course["last_graded_score"] = (
+                last_graded["score"] if last_graded is not None else None
+            )
+            course["last_graded_points_possible"] = (
+                last_graded["points_possible"] if last_graded is not None else None
+            )
+            course["last_graded_score_display"] = (
+                last_graded["score_display"] if last_graded is not None else None
+            )
+            course["last_graded_due_at"] = (
+                last_graded["due_at"] if last_graded is not None else None
+            )
+            course["last_graded_posted_at"] = (
+                last_graded["posted_at"] if last_graded is not None else None
+            )
 
         courses.sort(
             key=lambda course: (
@@ -225,6 +253,12 @@ def _normalize_course(course: dict[str, Any]) -> dict[str, Any]:
         "score": _extract_score(enrollment),
         "grade": _extract_grade(enrollment),
         "needs_grading_count": int(course.get("needs_grading_count") or 0),
+        "last_graded_assignment_title": None,
+        "last_graded_score": None,
+        "last_graded_points_possible": None,
+        "last_graded_score_display": None,
+        "last_graded_due_at": None,
+        "last_graded_posted_at": None,
     }
 
 
@@ -404,3 +438,94 @@ async def _async_fetch_assignment_details(
             detail_map[(course_id, str(detail["id"]))] = detail
 
     return detail_map
+
+
+async def _async_fetch_course_assignment_analytics(
+    client: CanvasApiClient,
+    user_id: str,
+    raw_courses: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch per-course assignment analytics for the current user."""
+    course_ids = [str(course["id"]) for course in raw_courses]
+    if not course_ids:
+        return {}
+
+    responses = await asyncio.gather(
+        *(client.async_get_course_assignment_analytics(course_id, user_id) for course_id in course_ids)
+    )
+
+    return {
+        course_id: analytics
+        for course_id, analytics in zip(course_ids, responses, strict=False)
+    }
+
+
+def _extract_last_graded_assignment(
+    analytics_rows: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Pick the most recent graded assignment from the analytics feed."""
+    candidates: list[dict[str, Any]] = []
+    for row in analytics_rows:
+        submission = row.get("submission") or {}
+        score = submission.get("score")
+        if score is None:
+            continue
+
+        due_at = _parse_canvas_datetime(row.get("due_at"))
+        posted_at = _parse_canvas_datetime(submission.get("posted_at"))
+        submitted_at = _parse_canvas_datetime(submission.get("submitted_at"))
+        ranking_date = posted_at or submitted_at or due_at
+        if ranking_date is None:
+            continue
+
+        score_value = _safe_float(score)
+        points_possible = _safe_float(row.get("points_possible"))
+        candidates.append(
+            {
+                "title": row.get("title") or "Untitled assignment",
+                "score": score_value,
+                "points_possible": points_possible,
+                "score_display": _format_score_display(score_value, points_possible),
+                "due_at": due_at,
+                "posted_at": posted_at,
+                "ranking_date": ranking_date,
+            }
+        )
+
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: (
+            item["ranking_date"],
+            item["due_at"] or item["ranking_date"],
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
+def _safe_float(value: Any) -> float | None:
+    """Convert a value to float when possible."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_score_display(score: float | None, points_possible: float | None) -> str | None:
+    """Format a score as `earned / possible` for display."""
+    if score is None:
+        return None
+    if points_possible is None:
+        return _format_number(score)
+    return f"{_format_number(score)} / {_format_number(points_possible)}"
+
+
+def _format_number(value: float) -> str:
+    """Format whole-number-like floats cleanly for UI presentation."""
+    if value.is_integer():
+        return str(int(value))
+    return f"{value:.2f}".rstrip("0").rstrip(".")

@@ -136,6 +136,16 @@ class CanvasApiClient:
             params=params,
         )
 
+    async def async_get_course_assignment_analytics(
+        self,
+        course_id: str,
+        user_id: str,
+    ) -> list[dict[str, Any]]:
+        """Fetch course assignment analytics for a specific user."""
+        return await self._async_paginated_get(
+            f"/api/v1/courses/{course_id}/analytics/users/{user_id}/assignments"
+        )
+
     async def _async_get_json(
         self,
         path: str,

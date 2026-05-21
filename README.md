@@ -21,8 +21,12 @@ Existing token-based installs can continue working.
 - `Courses with upcoming assignments`
 - `Courses tracked`
 - `Assignments needing grading`
+- Per-course `Current score`
+- Per-course `Current grade`
+- Per-course `Last graded assignment`
+- Per-course `Last graded score`
 
-The sensors include useful attributes such as assignment titles, due dates, course names, current grades when Canvas exposes them, and per-course workload summaries.
+The sensors include useful attributes such as assignment titles, due dates, course names, current grades when Canvas exposes them, last graded assignment scores like `18 / 20`, and per-course workload summaries.
 
 ## Installation
 
@@ -76,6 +80,8 @@ If the Developer Key is scoped, ask them to allow these scopes:
 - `url:GET|/api/v1/courses`
 - `url:GET|/api/v1/calendar_events`
 - `url:GET|/api/v1/users/self/missing_submissions`
+- `url:GET|/api/v1/users/self/courses/:course_id/assignments`
+- `url:GET|/api/v1/courses/:course_id/analytics/users/:student_id/assignments`
 
 If the Developer Key is scoped, ask them to enable `Allow Include Parameters` as well. This integration relies on Canvas `include[]` query parameters for course details such as teachers and grading summaries.
 

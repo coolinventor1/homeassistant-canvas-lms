@@ -8,6 +8,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription
+from homeassistant.const import PERCENTAGE
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
@@ -25,6 +26,14 @@ class CanvasSensorDescription(SensorEntityDescription):
 
     value_fn: Callable[[CanvasSnapshot], Any]
     attrs_fn: Callable[[CanvasSnapshot], dict[str, Any]]
+
+
+@dataclass(frozen=True, kw_only=True)
+class CanvasCourseSensorDescription(SensorEntityDescription):
+    """Describe a course-specific Canvas sensor."""
+
+    value_fn: Callable[[dict[str, Any]], Any]
+    attrs_fn: Callable[[dict[str, Any]], dict[str, Any]]
 
 
 def _next_assignment_field(data: CanvasSnapshot, field: str) -> Any:
@@ -98,9 +107,49 @@ def _serialize_courses(courses: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 else None,
                 "teachers": course.get("teachers"),
                 "url": course.get("html_url"),
+                "last_graded_assignment_title": course.get("last_graded_assignment_title"),
+                "last_graded_score": course.get("last_graded_score"),
+                "last_graded_points_possible": course.get("last_graded_points_possible"),
+                "last_graded_score_display": course.get("last_graded_score_display"),
+                "last_graded_due_at": course["last_graded_due_at"].isoformat()
+                if course.get("last_graded_due_at") is not None
+                else None,
+                "last_graded_posted_at": course["last_graded_posted_at"].isoformat()
+                if course.get("last_graded_posted_at") is not None
+                else None,
             }
         )
     return serialized
+
+
+def _serialize_course_common_attrs(course: dict[str, Any]) -> dict[str, Any]:
+    """Serialize common per-course attributes for dedicated course sensors."""
+    return {
+        "course_code": course.get("course_code"),
+        "workflow_state": course.get("workflow_state"),
+        "concluded": course.get("concluded"),
+        "teachers": course.get("teachers"),
+        "url": course.get("html_url"),
+        "current_score": course.get("score"),
+        "current_grade": course.get("grade"),
+        "last_graded_assignment": course.get("last_graded_assignment_title"),
+        "last_graded_score_value": course.get("last_graded_score"),
+        "last_graded_points_possible": course.get("last_graded_points_possible"),
+        "last_graded_score": course.get("last_graded_score_display"),
+        "last_graded_due_at": course["last_graded_due_at"].isoformat()
+        if course.get("last_graded_due_at") is not None
+        else None,
+        "last_graded_posted_at": course["last_graded_posted_at"].isoformat()
+        if course.get("last_graded_posted_at") is not None
+        else None,
+    }
+
+
+def _format_score_percentage(value: float | None) -> str | None:
+    """Format a course percentage for display when no letter grade is available."""
+    if value is None:
+        return None
+    return f"{value:.2f}".rstrip("0").rstrip(".") + "%"
 
 
 SENSOR_DESCRIPTIONS: tuple[CanvasSensorDescription, ...] = (
@@ -220,6 +269,46 @@ SENSOR_DESCRIPTIONS: tuple[CanvasSensorDescription, ...] = (
 )
 
 
+COURSE_SENSOR_DESCRIPTIONS: tuple[CanvasCourseSensorDescription, ...] = (
+    CanvasCourseSensorDescription(
+        key="current_score",
+        name="Current score",
+        native_unit_of_measurement=PERCENTAGE,
+        suggested_display_precision=2,
+        value_fn=lambda course: course.get("score"),
+        attrs_fn=lambda course: _serialize_course_common_attrs(course),
+    ),
+    CanvasCourseSensorDescription(
+        key="current_grade",
+        name="Current grade",
+        value_fn=lambda course: course.get("grade") or _format_score_percentage(course.get("score")),
+        attrs_fn=lambda course: _serialize_course_common_attrs(course),
+    ),
+    CanvasCourseSensorDescription(
+        key="last_graded_assignment",
+        name="Last graded assignment",
+        value_fn=lambda course: course.get("last_graded_assignment_title"),
+        attrs_fn=lambda course: {
+            **_serialize_course_common_attrs(course),
+            "score_display": course.get("last_graded_score_display"),
+            "score": course.get("last_graded_score"),
+            "points_possible": course.get("last_graded_points_possible"),
+        },
+    ),
+    CanvasCourseSensorDescription(
+        key="last_graded_score",
+        name="Last graded score",
+        value_fn=lambda course: course.get("last_graded_score_display"),
+        attrs_fn=lambda course: {
+            **_serialize_course_common_attrs(course),
+            "assignment": course.get("last_graded_assignment_title"),
+            "score": course.get("last_graded_score"),
+            "points_possible": course.get("last_graded_points_possible"),
+        },
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -227,7 +316,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up Canvas sensors from a config entry."""
     coordinator: CanvasDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(CanvasSensor(coordinator, entry, description) for description in SENSOR_DESCRIPTIONS)
+    entities: list[SensorEntity] = [
+        CanvasSensor(coordinator, entry, description) for description in SENSOR_DESCRIPTIONS
+    ]
+    for course in coordinator.data.courses:
+        for description in COURSE_SENSOR_DESCRIPTIONS:
+            entities.append(CanvasCourseSensor(coordinator, entry, course["id"], description))
+    async_add_entities(entities)
 
 
 class CanvasSensor(CoordinatorEntity[CanvasDataUpdateCoordinator], SensorEntity):
@@ -268,3 +363,67 @@ class CanvasSensor(CoordinatorEntity[CanvasDataUpdateCoordinator], SensorEntity)
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes for the sensor."""
         return self.entity_description.attrs_fn(self.coordinator.data)
+
+
+class CanvasCourseSensor(CoordinatorEntity[CanvasDataUpdateCoordinator], SensorEntity):
+    """Course-specific Canvas sensor backed by the coordinator snapshot."""
+
+    entity_description: CanvasCourseSensorDescription
+
+    def __init__(
+        self,
+        coordinator: CanvasDataUpdateCoordinator,
+        entry: ConfigEntry,
+        course_id: str,
+        description: CanvasCourseSensorDescription,
+    ) -> None:
+        """Initialize the course sensor."""
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._course_id = course_id
+        course = self._course
+        course_name = course["name"] if course is not None else course_id
+
+        self._attr_name = f"{course_name} {description.name}"
+        self._attr_unique_id = f"{entry.entry_id}_{course_id}_{description.key}"
+
+        host = urlsplit(entry.data[CONF_BASE_URL]).netloc or entry.data[CONF_BASE_URL]
+        profile_name = coordinator.data.profile.get("short_name") or coordinator.data.profile.get("name")
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=f"Canvas LMS ({profile_name or host})",
+            manufacturer="Instructure",
+            model=host,
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url=entry.data[CONF_BASE_URL],
+        )
+
+    @property
+    def _course(self) -> dict[str, Any] | None:
+        """Return the latest course snapshot for this sensor."""
+        return next(
+            (course for course in self.coordinator.data.courses if course["id"] == self._course_id),
+            None,
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether this course sensor currently has source data."""
+        return super().available and self._course is not None
+
+    @property
+    def native_value(self) -> Any:
+        """Return the current sensor state."""
+        course = self._course
+        if course is None:
+            return None
+        return self.entity_description.value_fn(course)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra attributes for the sensor."""
+        course = self._course
+        if course is None:
+            return {}
+        return self.entity_description.attrs_fn(course)
