@@ -136,14 +136,22 @@ class CanvasApiClient:
             params=params,
         )
 
-    async def async_get_course_assignment_analytics(
+    async def async_get_recent_graded_submissions(
         self,
         course_id: str,
-        user_id: str,
+        limit: int = 20,
     ) -> list[dict[str, Any]]:
-        """Fetch course assignment analytics for a specific user."""
+        """Fetch the current user's most recently graded submissions for a course."""
+        params: dict[str, Any] = {
+            "workflow_state": "graded",
+            "order": "graded_at",
+            "order_direction": "descending",
+            "include[]": ["assignment"],
+            "per_page": min(limit, 100),
+        }
         return await self._async_paginated_get(
-            f"/api/v1/courses/{course_id}/analytics/users/{user_id}/assignments"
+            f"/api/v1/courses/{course_id}/students/submissions",
+            params=params,
         )
 
     async def _async_get_json(

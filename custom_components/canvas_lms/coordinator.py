@@ -30,6 +30,8 @@ from .const import (
     DOMAIN,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 
 @dataclass(slots=True)
 class CanvasSnapshot:
@@ -114,14 +116,13 @@ class CanvasDataUpdateCoordinator(DataUpdateCoordinator[CanvasSnapshot]):
 
         courses = [_normalize_course(course) for course in raw_courses]
         course_lookup = {course["id"]: course for course in courses}
-        assignment_details, analytics_by_course = await asyncio.gather(
+        assignment_details, recent_submissions_by_course = await asyncio.gather(
             _async_fetch_assignment_details(
                 self._client,
                 raw_assignments,
             ),
-            _async_fetch_course_assignment_analytics(
+            _async_fetch_recent_graded_submissions(
                 self._client,
-                str(profile["id"]),
                 raw_courses,
             ),
         )
@@ -175,7 +176,7 @@ class CanvasDataUpdateCoordinator(DataUpdateCoordinator[CanvasSnapshot]):
 
         for course in courses:
             last_graded = _extract_last_graded_assignment(
-                analytics_by_course.get(course["id"], [])
+                recent_submissions_by_course.get(course["id"], [])
             )
             metrics = course_metrics[course["id"]]
             course["due_today_count"] = metrics["due_today_count"]
@@ -440,54 +441,64 @@ async def _async_fetch_assignment_details(
     return detail_map
 
 
-async def _async_fetch_course_assignment_analytics(
+async def _async_fetch_recent_graded_submissions(
     client: CanvasApiClient,
-    user_id: str,
     raw_courses: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Fetch per-course assignment analytics for the current user."""
+    """Fetch recent graded submissions for each course without failing the full refresh."""
     course_ids = [str(course["id"]) for course in raw_courses]
     if not course_ids:
         return {}
 
     responses = await asyncio.gather(
-        *(client.async_get_course_assignment_analytics(course_id, user_id) for course_id in course_ids)
+        *(client.async_get_recent_graded_submissions(course_id) for course_id in course_ids),
+        return_exceptions=True,
     )
 
-    return {
-        course_id: analytics
-        for course_id, analytics in zip(course_ids, responses, strict=False)
-    }
+    submissions_by_course: dict[str, list[dict[str, Any]]] = {}
+    for course_id, response in zip(course_ids, responses, strict=False):
+        if isinstance(response, Exception):
+            _LOGGER.debug(
+                "Skipping last-graded lookup for course %s because Canvas rejected or failed the request: %s",
+                course_id,
+                response,
+            )
+            submissions_by_course[course_id] = []
+            continue
+        submissions_by_course[course_id] = response
+
+    return submissions_by_course
 
 
 def _extract_last_graded_assignment(
-    analytics_rows: list[dict[str, Any]],
+    submissions: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    """Pick the most recent graded assignment from the analytics feed."""
+    """Pick the most recent graded assignment from recent submissions."""
     candidates: list[dict[str, Any]] = []
-    for row in analytics_rows:
-        submission = row.get("submission") or {}
+    for submission in submissions:
         score = submission.get("score")
         if score is None:
             continue
 
-        due_at = _parse_canvas_datetime(row.get("due_at"))
+        assignment = submission.get("assignment") or {}
+        due_at = _parse_canvas_datetime(assignment.get("due_at"))
+        graded_at = _parse_canvas_datetime(submission.get("graded_at"))
         posted_at = _parse_canvas_datetime(submission.get("posted_at"))
         submitted_at = _parse_canvas_datetime(submission.get("submitted_at"))
-        ranking_date = posted_at or submitted_at or due_at
+        ranking_date = posted_at or graded_at or submitted_at or due_at
         if ranking_date is None:
             continue
 
         score_value = _safe_float(score)
-        points_possible = _safe_float(row.get("points_possible"))
+        points_possible = _safe_float(assignment.get("points_possible"))
         candidates.append(
             {
-                "title": row.get("title") or "Untitled assignment",
+                "title": assignment.get("name") or "Untitled assignment",
                 "score": score_value,
                 "points_possible": points_possible,
                 "score_display": _format_score_display(score_value, points_possible),
                 "due_at": due_at,
-                "posted_at": posted_at,
+                "posted_at": posted_at or graded_at,
                 "ranking_date": ranking_date,
             }
         )

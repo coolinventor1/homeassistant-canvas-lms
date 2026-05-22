@@ -81,7 +81,7 @@ If the Developer Key is scoped, ask them to allow these scopes:
 - `url:GET|/api/v1/calendar_events`
 - `url:GET|/api/v1/users/self/missing_submissions`
 - `url:GET|/api/v1/users/self/courses/:course_id/assignments`
-- `url:GET|/api/v1/courses/:course_id/analytics/users/:student_id/assignments`
+- `url:GET|/api/v1/courses/:course_id/students/submissions`
 
 If the Developer Key is scoped, ask them to enable `Allow Include Parameters` as well. This integration relies on Canvas `include[]` query parameters for course details such as teachers and grading summaries.
 
