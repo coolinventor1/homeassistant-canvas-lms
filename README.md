@@ -1,4 +1,9 @@
-# Canvas LMS for Home Assistant
+# Home Assistant Custom Integrations
+
+This repo currently ships two HACS-ready custom integrations:
+
+- `Canvas LMS` for assignments, due dates, grades, and course summaries
+- `DoorDash Status` for active order status, ETA, totals, and item summaries
 
 `canvas_lms` is a HACS-ready custom integration for Home Assistant that connects to Canvas and exposes assignment and course data as sensors.
 
@@ -97,3 +102,31 @@ If the Developer Key is scoped, ask them to enable `Allow Include Parameters` as
 A built-in Lovelace dashboard example is available in [examples/canvas_dashboard_card.yaml](examples/canvas_dashboard_card.yaml).
 
 Replace the placeholder entity IDs with the actual Canvas sensor entity IDs from your Home Assistant instance.
+
+## DoorDash Status for Home Assistant
+
+`doordash_status` is an unofficial custom integration for Home Assistant that reads DoorDash consumer order status from either:
+
+- a DoorDash tracking URL from an email or message
+- a copied browser `Cookie` header from a logged-in DoorDash session
+
+Because DoorDash does not offer a general public consumer-order API for this use case, this integration works by reading DoorDash order pages and extracting structured order data from the page payloads.
+
+### What it exposes
+
+- `Active orders`
+- `Latest order status`
+- `Latest order store`
+- `Latest order ETA`
+- `Latest order ETA text`
+- `Latest order total`
+- `Latest order item count`
+- `Latest dasher`
+
+The sensors include useful attributes like item lists, tracking URLs, fulfillment type, ETA text, and recent order summaries.
+
+### Notes
+
+- Tracking-link mode is the cleanest setup when DoorDash gives you a shareable tracking URL.
+- Browser-session mode is more flexible, but it is unofficial and may stop working if DoorDash changes its website.
+- If DoorDash logs you out or rotates the session, you will need to paste a fresh cookie header.
